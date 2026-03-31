@@ -1,15 +1,25 @@
 'use client'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { getSupabaseBrowserClient } from '@/lib/supabase-browser'
 
 const links = [
-  { href: '/',             label: 'Dashboard' },
-  { href: '/assign',       label: 'Assign Desk' },
-  { href: '/assignments',  label: 'All Assignments' },
+  { href: '/',            label: 'Dashboard' },
+  { href: '/assign',      label: 'Assign Desk' },
+  { href: '/assignments', label: 'All Assignments' },
+  { href: '/students',    label: 'Students' },
 ]
 
 export default function Navbar() {
   const pathname = usePathname()
+  const router = useRouter()
+
+  async function handleLogout() {
+    const supabase = getSupabaseBrowserClient()
+    await supabase.auth.signOut()
+    router.push('/login')
+    router.refresh()
+  }
 
   return (
     <nav className="bg-white border-b border-slate-200 shadow-sm">
@@ -17,7 +27,7 @@ export default function Navbar() {
         <span className="font-bold text-lg text-slate-800 tracking-tight">
           📚 Desk Manager
         </span>
-        <div className="flex gap-1">
+        <div className="flex items-center gap-1">
           {links.map(({ href, label }) => (
             <Link
               key={href}
@@ -31,6 +41,12 @@ export default function Navbar() {
               {label}
             </Link>
           ))}
+          <button
+            onClick={handleLogout}
+            className="ml-3 px-3 py-1.5 rounded-md text-sm font-medium text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors border border-slate-200"
+          >
+            Sign Out
+          </button>
         </div>
       </div>
     </nav>

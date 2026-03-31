@@ -1,34 +1,117 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { format } from 'date-fns'
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isSameMonth } from 'date-fns'
 import { TIME_SLOTS, SLOT_COLORS } from '@/lib/timeSlots'
+import { DESK_LAYOUT, VALID_DESK_SET } from '@/lib/deskLayout'
 import Link from 'next/link'
 
-const TOTAL_DESKS = 93
+const TOTAL_DESKS = 93  // DESK_COUNT === 93
+const TODAY = new Date()
+const TODAY_STR = format(TODAY, 'yyyy-MM-dd')
 
-function getStatusForDesk(deskNum, assignments) {
-  const today = new Date().toISOString().split('T')[0]
+function toStr(date) { return format(date, 'yyyy-MM-dd') }
+
+function getStatusForDesk(deskNum, assignments, dateStr) {
   const active = assignments.filter(
-    a => a.desk_number === deskNum && a.start_date <= today && a.end_date >= today
+    a => a.desk_number === deskNum && a.start_date <= dateStr && a.end_date >= dateStr
   )
   if (active.length === 0) return { status: 'free', assignments: [] }
-
   const hasFullDay = active.some(a => a.time_slot === 'full_day')
   if (hasFullDay) return { status: 'full', assignments: active }
-
   const slots = new Set(active.map(a => a.time_slot))
   const isFull =
     (slots.has('day') && slots.has('evening')) ||
     (slots.has('morning') && slots.has('afternoon_evening'))
-
   return { status: isFull ? 'full' : 'partial', assignments: active }
+}
+
+// Returns dot color for a date in the mini calendar
+function getDotForDate(assignments, dateStr) {
+  let free = 0, partial = 0, full = 0
+  for (let i = 1; i <= TOTAL_DESKS; i++) {
+    const s = getStatusForDesk(i, assignments, dateStr).status
+    if (s === 'free') free++
+    else if (s === 'partial') partial++
+    else full++
+  }
+  if (full > 60) return 'red'
+  if (full + partial > 30) return 'yellow'
+  return null
+}
+
+function MiniCalendar({ selected, onSelect, assignments }) {
+  const [month, setMonth] = useState(startOfMonth(selected))
+  const days = eachDayOfInterval({ start: startOfMonth(month), end: endOfMonth(month) })
+  const startPad = getDay(startOfMonth(month)) // 0=Sun
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 select-none">
+      {/* Month nav */}
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={() => setMonth(m => subMonths(m, 1))}
+          className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-500 text-sm">‹</button>
+        <span className="text-sm font-semibold text-slate-700">{format(month, 'MMMM yyyy')}</span>
+        <button onClick={() => setMonth(m => addMonths(m, 1))}
+          className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-500 text-sm">›</button>
+      </div>
+
+      {/* Day headers */}
+      <div className="grid grid-cols-7 mb-1">
+        {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
+          <div key={d} className="text-center text-xs font-medium text-slate-400 py-1">{d}</div>
+        ))}
+      </div>
+
+      {/* Days */}
+      <div className="grid grid-cols-7 gap-y-1">
+        {/* Padding */}
+        {Array.from({ length: startPad }).map((_, i) => <div key={`pad-${i}`} />)}
+
+        {days.map(day => {
+          const dateStr = toStr(day)
+          const isSelected = toStr(selected) === dateStr
+          const isToday = dateStr === TODAY_STR
+          const dot = getDotForDate(assignments, dateStr)
+          const inMonth = isSameMonth(day, month)
+
+          return (
+            <button
+              key={dateStr}
+              onClick={() => onSelect(day)}
+              className={`relative flex flex-col items-center justify-center h-9 w-full rounded-lg text-xs font-medium transition-colors
+                ${isSelected ? 'bg-blue-600 text-white' : isToday ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-100 text-slate-700'}
+                ${!inMonth ? 'opacity-30' : ''}
+              `}
+            >
+              {day.getDate()}
+              {/* Occupancy dot */}
+              {dot && !isSelected && (
+                <span className={`absolute bottom-1 w-1 h-1 rounded-full ${dot === 'red' ? 'bg-red-400' : 'bg-yellow-400'}`} />
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Legend */}
+      <div className="flex gap-3 mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400 inline-block" />Busy</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block" />Very busy</span>
+      </div>
+    </div>
+  )
 }
 
 export default function Dashboard() {
   const [assignments, setAssignments] = useState([])
   const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState(null)
+  const [selectedDate, setSelectedDate] = useState(TODAY)
+  const [selectedDesk, setSelectedDesk] = useState(null)
   const [filterSlot, setFilterSlot] = useState('all')
+  const [calendarOpen, setCalendarOpen] = useState(false)
+
+  const dateStr = toStr(selectedDate)
+  const isToday = dateStr === TODAY_STR
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -40,11 +123,12 @@ export default function Dashboard() {
 
   useEffect(() => { load() }, [load])
 
+  // Recalculate desk statuses for selected date
   const counts = { free: 0, partial: 0, full: 0 }
   const deskStatuses = {}
-  for (let i = 1; i <= TOTAL_DESKS; i++) {
-    const info = getStatusForDesk(i, assignments)
-    deskStatuses[i] = info
+  for (const num of VALID_DESK_SET) {
+    const info = getStatusForDesk(num, assignments, dateStr)
+    deskStatuses[num] = info
     counts[info.status]++
   }
 
@@ -60,7 +144,7 @@ export default function Dashboard() {
     return !wouldConflict
   }
 
-  const selectedInfo = selected ? deskStatuses[selected] : null
+  const selectedDeskInfo = selectedDesk ? deskStatuses[selectedDesk] : null
 
   return (
     <div className="space-y-6">
@@ -68,15 +152,49 @@ export default function Dashboard() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Desk Overview</h1>
-          <p className="text-sm text-slate-500">{format(new Date(), 'EEEE, d MMMM yyyy')} (IST)</p>
+          <p className="text-sm text-slate-500">
+            {isToday ? 'Today — ' : ''}{format(selectedDate, 'EEEE, d MMMM yyyy')} (IST)
+          </p>
         </div>
-        <Link
-          href="/assign"
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          + Assign a Desk
-        </Link>
+        <div className="flex gap-2 items-center">
+          {/* Calendar toggle */}
+          <button
+            onClick={() => setCalendarOpen(o => !o)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+              calendarOpen
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+            }`}
+          >
+            <span>📅</span>
+            <span>{calendarOpen ? format(selectedDate, 'd MMM') : (!isToday ? format(selectedDate, 'd MMM') : 'Calendar')}</span>
+            <span className={`text-xs transition-transform ${calendarOpen ? 'rotate-180' : ''}`}>▼</span>
+          </button>
+          {!isToday && (
+            <button
+              onClick={() => { setSelectedDate(TODAY); setCalendarOpen(false) }}
+              className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              Today
+            </button>
+          )}
+          <Link href="/assign"
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+            + Assign a Desk
+          </Link>
+        </div>
       </div>
+
+      {/* Collapsible Calendar */}
+      {calendarOpen && (
+        <div className="w-72">
+          <MiniCalendar
+            selected={selectedDate}
+            onSelect={(d) => { setSelectedDate(d); setSelectedDesk(null); setCalendarOpen(false) }}
+            assignments={assignments}
+          />
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
@@ -96,52 +214,73 @@ export default function Dashboard() {
       <div className="flex flex-wrap gap-2 items-center">
         <span className="text-sm text-slate-500 font-medium">Show available for:</span>
         {[
-          { key: 'all',  label: 'All Desks' },
-          { key: 'free', label: 'Fully Free' },
-          ...Object.entries(TIME_SLOTS).map(([k, v]) => ({ key: k, label: v.short })),
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setFilterSlot(key)}
-            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+          { key: 'all',  label: 'All Desks',  time: null },
+          { key: 'free', label: 'Fully Free', time: null },
+          ...Object.entries(TIME_SLOTS).map(([k, v]) => ({
+            key: k,
+            label: v.short,
+            time: `${v.start < 12 ? v.start + 'am' : v.start === 12 ? '12pm' : (v.start - 12) + 'pm'} – ${v.end === 12 ? '12pm' : v.end > 12 ? (v.end - 12) + 'pm' : v.end + 'am'}`,
+          })),
+        ].map(({ key, label, time }) => (
+          <button key={key} onClick={() => setFilterSlot(key)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors flex flex-col items-center leading-tight ${
               filterSlot === key
                 ? 'bg-blue-600 text-white border-blue-600'
                 : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
-            }`}
-          >
-            {label}
+            }`}>
+            <span>{label}</span>
+            {time && <span className={`text-[10px] font-normal mt-0.5 ${filterSlot === key ? 'text-blue-100' : 'text-slate-400'}`}>{time}</span>}
           </button>
         ))}
       </div>
 
-      {/* Desk grid */}
+      {/* Desk grid — flat CSS grid, separator columns bridge row gaps for continuous lines */}
       {loading ? (
         <div className="text-center py-20 text-slate-400">Loading...</div>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-2">
-          {Array.from({ length: TOTAL_DESKS }, (_, i) => i + 1).map(num => {
-            const info = deskStatuses[num]
-            const visible = deskVisible(num)
-            const isSelected = selected === num
-
-            let bg = 'bg-green-100 border-green-300 hover:border-green-500 text-green-800'
-            if (info.status === 'partial') bg = 'bg-yellow-100 border-yellow-300 hover:border-yellow-500 text-yellow-800'
-            if (info.status === 'full')    bg = 'bg-red-100 border-red-300 hover:border-red-400 text-red-800'
-            if (!visible)                  bg = 'bg-slate-100 border-slate-200 text-slate-300 opacity-40 cursor-default'
-
-            return (
-              <button
-                key={num}
-                onClick={() => visible && setSelected(isSelected ? null : num)}
-                className={`
-                  border-2 rounded-lg h-12 text-sm font-bold transition-all
-                  ${bg}
-                  ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 scale-110 z-10' : ''}
-                `}
-              >
-                {num}
-              </button>
-            )
+        // 11 desk cols + 5 separator cols = 16 grid columns
+        // gap-x-1.5 (6px), gap-y-1.5 (6px). Separators are -mt-[3px] h-[calc(55px+6px)] to bridge gaps.
+        <div
+          className="grid gap-x-1.5 gap-y-1.5 overflow-hidden w-full"
+          style={{ gridTemplateColumns: '1fr 1fr 2px 1fr 1fr 2px 1fr 1fr 2px 1fr 1fr 2px 1fr 1fr 2px 1fr' }}
+        >
+          {DESK_LAYOUT.map((row, rowIdx) => {
+            // Map 11 desk values → 16 cells (insert separator after positions 1,3,5,7,9)
+            const gridCells = []
+            const insertSepAfter = new Set([1, 3, 5, 7, 9])
+            row.forEach((num, colIdx) => {
+              // Desk cell
+              if (num === 0) {
+                gridCells.push(<div key={`${rowIdx}-${colIdx}`} className="h-[55px]" />)
+              } else {
+                const info = deskStatuses[num]
+                const visible = deskVisible(num)
+                const isSelected = selectedDesk === num
+                let bg = 'bg-green-100 border-green-300 hover:border-green-500 text-green-800'
+                if (info?.status === 'partial') bg = 'bg-yellow-100 border-yellow-300 hover:border-yellow-500 text-yellow-800'
+                if (info?.status === 'full')    bg = 'bg-red-100 border-red-300 hover:border-red-400 text-red-800'
+                if (!visible)                   bg = 'bg-slate-100 border-slate-200 text-slate-300 opacity-40 cursor-default'
+                gridCells.push(
+                  <button
+                    key={`${rowIdx}-${colIdx}`}
+                    onClick={() => visible && setSelectedDesk(isSelected ? null : num)}
+                    className={`h-[55px] border-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center ${bg} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 z-10' : ''}`}
+                  >
+                    {num}
+                  </button>
+                )
+              }
+              // Separator cell after every 2nd column (not after last)
+              if (insertSepAfter.has(colIdx)) {
+                gridCells.push(
+                  <div
+                    key={`${rowIdx}-sep-${colIdx}`}
+                    className="bg-slate-300 -mt-[3px] h-[calc(55px+6px)]"
+                  />
+                )
+              }
+            })
+            return gridCells
           })}
         </div>
       )}
@@ -161,38 +300,35 @@ export default function Dashboard() {
       </div>
 
       {/* Desk detail panel */}
-      {selected && selectedInfo && (
+      {selectedDesk && selectedDeskInfo && (
         <div className="border border-slate-200 bg-white rounded-xl p-5 shadow-sm">
           <div className="flex items-start justify-between mb-4">
-            <h2 className="text-lg font-bold text-slate-800">Desk {selected}</h2>
+            <div>
+              <h2 className="text-lg font-bold text-slate-800">Desk {selectedDesk}</h2>
+              <p className="text-xs text-slate-400">{format(selectedDate, 'd MMM yyyy')}</p>
+            </div>
             <div className="flex gap-2">
-              <Link
-                href={`/assign?desk=${selected}`}
-                className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-blue-700"
-              >
+              <Link href={`/assign?desk=${selectedDesk}`}
+                className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-blue-700">
                 Assign
               </Link>
-              <button
-                onClick={() => setSelected(null)}
-                className="text-slate-400 hover:text-slate-600 px-2 text-lg"
-              >✕</button>
+              <button onClick={() => setSelectedDesk(null)}
+                className="text-slate-400 hover:text-slate-600 px-2 text-lg">✕</button>
             </div>
           </div>
 
-          {selectedInfo.assignments.length === 0 ? (
-            <p className="text-green-600 font-medium">All slots available today</p>
+          {selectedDeskInfo.assignments.length === 0 ? (
+            <p className="text-green-600 font-medium">All slots available on this day</p>
           ) : (
             <div className="space-y-2">
-              <p className="text-sm text-slate-500 font-medium mb-2">Active today:</p>
-              {selectedInfo.assignments.map(a => (
-                <div key={a.id} className={`border rounded-lg px-3 py-2 text-sm flex items-center justify-between ${SLOT_COLORS[a.time_slot]}`}>
-                  <div>
-                    <span className="font-semibold">{a.person_name}</span>
-                    <span className="mx-2 opacity-50">·</span>
-                    <span>{TIME_SLOTS[a.time_slot]?.short}</span>
-                    <span className="mx-2 opacity-50">·</span>
-                    <span className="text-xs">{a.start_date} → {a.end_date}</span>
-                  </div>
+              <p className="text-sm text-slate-500 font-medium mb-2">Booked slots:</p>
+              {selectedDeskInfo.assignments.map(a => (
+                <div key={a.id} className={`border rounded-lg px-3 py-2 text-sm flex items-center gap-3 ${SLOT_COLORS[a.time_slot]}`}>
+                  <span className="font-semibold">{a.person_name}</span>
+                  <span className="opacity-50">·</span>
+                  <span>{TIME_SLOTS[a.time_slot]?.short}</span>
+                  <span className="opacity-50">·</span>
+                  <span className="text-xs">{a.start_date} → {a.end_date}</span>
                 </div>
               ))}
             </div>

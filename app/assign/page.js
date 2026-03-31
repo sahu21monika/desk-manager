@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { TIME_SLOTS } from '@/lib/timeSlots'
+import { VALID_DESKS } from '@/lib/deskLayout'
 import { format, addDays } from 'date-fns'
 
 function AssignForm() {
@@ -71,16 +72,17 @@ function AssignForm() {
         {/* Desk number */}
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Desk Number <span className="text-red-500">*</span></label>
-          <input
-            type="number"
-            min="1"
-            max="93"
+          <select
             required
             value={form.desk_number}
             onChange={e => set('desk_number', e.target.value)}
-            placeholder="1 – 93"
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          >
+            <option value="">Select a desk...</option>
+            {VALID_DESKS.map(n => (
+              <option key={n} value={n}>Desk {n}</option>
+            ))}
+          </select>
         </div>
 
         {/* Person name */}

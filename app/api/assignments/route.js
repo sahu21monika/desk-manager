@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { slotsOverlap } from '@/lib/timeSlots'
+import { VALID_DESK_SET } from '@/lib/deskLayout'
 import { NextResponse } from 'next/server'
 
 // GET /api/assignments?date=YYYY-MM-DD&desk=1
@@ -39,8 +40,8 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
-  if (desk_number < 1 || desk_number > 93) {
-    return NextResponse.json({ error: 'Desk number must be between 1 and 93' }, { status: 400 })
+  if (!VALID_DESK_SET.has(desk_number)) {
+    return NextResponse.json({ error: `Desk ${desk_number} does not exist` }, { status: 400 })
   }
 
   // Check for conflicts: any active assignment on this desk in overlapping date range & time slot

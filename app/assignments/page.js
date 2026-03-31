@@ -1,17 +1,20 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { TIME_SLOTS, SLOT_COLORS } from '@/lib/timeSlots'
-import { format, isAfter, isBefore, parseISO, addDays } from 'date-fns'
+import { VALID_DESKS, VALID_DESK_SET } from '@/lib/deskLayout'
+import { format, parseISO } from 'date-fns'
 import Link from 'next/link'
+
+const inputCls = 'border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mt-0.5'
 
 export default function AssignmentsPage() {
   const [assignments, setAssignments] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState('active')  // 'all', 'active', 'expired'
+  const [filter, setFilter] = useState('active')
   const [editingId, setEditingId] = useState(null)
-  const [editDays, setEditDays] = useState('')
-  const [editNotes, setEditNotes] = useState('')
+  const [edit, setEdit] = useState({})
+  const [saveError, setSaveError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const today = new Date().toISOString().split('T')[0]
@@ -26,40 +29,68 @@ export default function AssignmentsPage() {
 
   useEffect(() => { load() }, [load])
 
+  function startEdit(a) {
+    setEdit({
+      desk_number: String(a.desk_number),
+      time_slot: a.time_slot,
+      start_date: a.start_date,
+      end_date: a.end_date,
+      notes: a.notes || '',
+    })
+    setSaveError('')
+    setEditingId(a.id)
+  }
+
+  async function saveEdit(a) {
+    if (!VALID_DESK_SET.has(parseInt(edit.desk_number))) {
+      setSaveError(`Desk ${edit.desk_number} does not exist`)
+      return
+    }
+    if (edit.end_date < edit.start_date) {
+      setSaveError('End date cannot be before start date')
+      return
+    }
+    setSaving(true)
+    setSaveError('')
+    const res = await fetch(`/api/assignments/${a.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        desk_number: parseInt(edit.desk_number),
+        time_slot: edit.time_slot,
+        start_date: edit.start_date,
+        end_date: edit.end_date,
+        notes: edit.notes,
+      }),
+    })
+    const data = await res.json()
+    setSaving(false)
+    if (!res.ok) {
+      setSaveError(data.error || 'Something went wrong')
+      return
+    }
+    setEditingId(null)
+    load()
+  }
+
   async function remove(id) {
     if (!confirm('Remove this assignment?')) return
     await fetch(`/api/assignments/${id}`, { method: 'DELETE' })
     setAssignments(a => a.filter(x => x.id !== id))
   }
 
-  async function saveEdit(a) {
-    setSaving(true)
-    const newEndDate = format(addDays(parseISO(a.start_date), Number(editDays) - 1), 'yyyy-MM-dd')
-    await fetch(`/api/assignments/${a.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ end_date: newEndDate, notes: editNotes }),
-    })
-    setSaving(false)
-    setEditingId(null)
-    load()
-  }
-
   const filtered = assignments.filter(a => {
     const matchSearch = !search ||
       a.person_name.toLowerCase().includes(search.toLowerCase()) ||
       String(a.desk_number).includes(search)
-
     const isActive = a.end_date >= today
     const matchFilter =
       filter === 'all' ||
       (filter === 'active' && isActive) ||
       (filter === 'expired' && !isActive)
-
     return matchSearch && matchFilter
   })
 
-  // Sort: active first, then by start_date desc
   filtered.sort((a, b) => {
     const aActive = a.end_date >= today
     const bActive = b.end_date >= today
@@ -71,10 +102,7 @@ export default function AssignmentsPage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-slate-800">All Assignments</h1>
-        <Link
-          href="/assign"
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700"
-        >
+        <Link href="/assign" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
           + Assign a Desk
         </Link>
       </div>
@@ -94,13 +122,8 @@ export default function AssignmentsPage() {
             { key: 'expired', label: 'Expired' },
             { key: 'all',     label: 'All' },
           ].map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setFilter(key)}
-              className={`px-4 py-2 font-medium transition-colors ${
-                filter === key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
+            <button key={key} onClick={() => setFilter(key)}
+              className={`px-4 py-2 font-medium transition-colors ${filter === key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
               {label}
             </button>
           ))}
@@ -118,46 +141,95 @@ export default function AssignmentsPage() {
             const isEditing = editingId === a.id
 
             return (
-              <div
-                key={a.id}
-                className={`bg-white border rounded-xl px-4 py-3 shadow-sm transition-all ${
-                  isActive ? 'border-slate-200' : 'border-slate-100 opacity-60'
-                }`}
-              >
+              <div key={a.id} className={`bg-white border rounded-xl px-4 py-3 shadow-sm transition-all ${isActive ? 'border-slate-200' : 'border-slate-100 opacity-60'}`}>
                 {isEditing ? (
                   <div className="space-y-3">
-                    <div className="flex flex-wrap gap-3">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Editing — {a.person_name}</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {/* Desk number */}
                       <div>
-                        <label className="text-xs text-slate-500 font-medium">Days (from start date)</label>
+                        <label className="text-xs text-slate-500 font-medium">Desk No.</label>
+                        <select
+                          value={edit.desk_number}
+                          onChange={e => setEdit(v => ({ ...v, desk_number: e.target.value }))}
+                          className={`block w-full bg-white ${inputCls}`}
+                        >
+                          {VALID_DESKS.map(n => (
+                            <option key={n} value={n}>Desk {n}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Start date */}
+                      <div>
+                        <label className="text-xs text-slate-500 font-medium">Start Date</label>
                         <input
-                          type="number" min="1" max="365"
-                          value={editDays}
-                          onChange={e => setEditDays(e.target.value)}
-                          className="block border border-slate-300 rounded px-2 py-1 text-sm w-24 mt-0.5"
+                          type="date"
+                          value={edit.start_date}
+                          onChange={e => setEdit(v => ({ ...v, start_date: e.target.value }))}
+                          className={`block w-full ${inputCls}`}
                         />
                       </div>
-                      <div className="flex-1">
+
+                      {/* End date */}
+                      <div>
+                        <label className="text-xs text-slate-500 font-medium">End Date</label>
+                        <input
+                          type="date"
+                          value={edit.end_date}
+                          min={edit.start_date}
+                          onChange={e => setEdit(v => ({ ...v, end_date: e.target.value }))}
+                          className={`block w-full ${inputCls}`}
+                        />
+                      </div>
+
+                      {/* Notes */}
+                      <div>
                         <label className="text-xs text-slate-500 font-medium">Notes</label>
                         <input
                           type="text"
-                          value={editNotes}
-                          onChange={e => setEditNotes(e.target.value)}
-                          className="block border border-slate-300 rounded px-2 py-1 text-sm w-full mt-0.5"
+                          value={edit.notes}
+                          onChange={e => setEdit(v => ({ ...v, notes: e.target.value }))}
+                          className={`block w-full ${inputCls}`}
                         />
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => saveEdit(a)}
-                        disabled={saving}
-                        className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                      >
+
+                    {/* Time slot */}
+                    <div>
+                      <label className="text-xs text-slate-500 font-medium block mb-1.5">Time Slot</label>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(TIME_SLOTS).map(([key, slot]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setEdit(v => ({ ...v, time_slot: key }))}
+                            className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                              edit.time_slot === key
+                                ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                            }`}
+                          >
+                            {slot.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Error */}
+                    {saveError && (
+                      <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2">
+                        {saveError}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={() => saveEdit(a)} disabled={saving}
+                        className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
                         {saving ? 'Saving...' : 'Save'}
                       </button>
-                      <button
-                        onClick={() => setEditingId(null)}
-                        className="border border-slate-300 px-3 py-1.5 rounded text-sm text-slate-600 hover:bg-slate-50"
-                      >
+                      <button onClick={() => setEditingId(null)}
+                        className="border border-slate-300 px-4 py-1.5 rounded text-sm text-slate-600 hover:bg-slate-50">
                         Cancel
                       </button>
                     </div>
@@ -165,53 +237,23 @@ export default function AssignmentsPage() {
                 ) : (
                   <div className="flex flex-wrap items-center gap-3 justify-between">
                     <div className="flex items-center gap-3 flex-wrap">
-                      {/* Desk badge */}
                       <span className="bg-slate-800 text-white text-xs font-bold px-2.5 py-1 rounded-md">
                         Desk {a.desk_number}
                       </span>
-                      {/* Name */}
                       <span className="font-semibold text-slate-800 text-sm">{a.person_name}</span>
-                      {/* Slot badge */}
                       <span className={`text-xs px-2 py-0.5 rounded border font-medium ${SLOT_COLORS[a.time_slot]}`}>
                         {TIME_SLOTS[a.time_slot]?.short}
                       </span>
-                      {/* Dates */}
-                      <span className="text-xs text-slate-500">
-                        {a.start_date} → {a.end_date}
-                      </span>
-                      {/* Status */}
-                      {isActive ? (
-                        <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full">Active</span>
-                      ) : (
-                        <span className="text-xs text-slate-400 font-medium bg-slate-100 px-2 py-0.5 rounded-full">Expired</span>
-                      )}
-                      {/* Notes */}
-                      {a.notes && (
-                        <span className="text-xs text-slate-400 italic">{a.notes}</span>
-                      )}
+                      <span className="text-xs text-slate-500">{a.start_date} → {a.end_date}</span>
+                      {isActive
+                        ? <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full">Active</span>
+                        : <span className="text-xs text-slate-400 font-medium bg-slate-100 px-2 py-0.5 rounded-full">Expired</span>
+                      }
+                      {a.notes && <span className="text-xs text-slate-400 italic">{a.notes}</span>}
                     </div>
-                    {/* Actions */}
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          // Calculate days from start to end
-                          const start = parseISO(a.start_date)
-                          const end = parseISO(a.end_date)
-                          const diff = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1
-                          setEditDays(String(diff))
-                          setEditNotes(a.notes || '')
-                          setEditingId(a.id)
-                        }}
-                        className="text-xs text-blue-600 hover:underline"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => remove(a.id)}
-                        className="text-xs text-red-500 hover:underline"
-                      >
-                        Remove
-                      </button>
+                      <button onClick={() => startEdit(a)} className="text-xs text-blue-600 hover:underline">Edit</button>
+                      <button onClick={() => remove(a.id)} className="text-xs text-red-500 hover:underline">Remove</button>
                     </div>
                   </div>
                 )}
