@@ -147,7 +147,7 @@ export default function Dashboard() {
   const selectedDeskInfo = selectedDesk ? deskStatuses[selectedDesk] : null
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -185,9 +185,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Collapsible Calendar */}
+      {/* Collapsible Calendar — floats over content, top-right */}
       {calendarOpen && (
-        <div className="w-72">
+        <div className="absolute right-4 z-50 w-72 shadow-xl">
           <MiniCalendar
             selected={selectedDate}
             onSelect={(d) => { setSelectedDate(d); setSelectedDesk(null); setCalendarOpen(false) }}
