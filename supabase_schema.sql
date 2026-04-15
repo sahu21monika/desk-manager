@@ -4,7 +4,7 @@ create table if not exists assignments (
   id          uuid default gen_random_uuid() primary key,
   desk_number integer not null check (desk_number >= 1 and desk_number <= 93),
   person_name text not null,
-  time_slot   text not null check (time_slot in ('full_day','morning','afternoon_evening','day','evening')),
+  time_slot   text not null check (time_slot in ('full_day','morning','afternoon_evening','day','evening','afternoon','late_evening')),
   start_date  date not null,
   end_date    date not null,
   notes       text,
